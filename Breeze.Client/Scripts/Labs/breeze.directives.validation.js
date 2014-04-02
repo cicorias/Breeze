@@ -1,7 +1,9 @@
 ﻿/*
  * Breeze directives for validation
  *
- *  v.1.3.4
+ * [OBSOLETE/DEPRECATED PLEASE USE Breeze.directives.js]
+ * [RETAINED FOR BACKWARD COMPAT ONLY. WILL BE REMOVED IN 2014]
+ * LAST VERSION 1.3.3
  *
  *  Usage:
  *     Make this module a dependency of your app module:

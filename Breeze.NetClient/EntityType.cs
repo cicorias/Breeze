@@ -2,10 +2,12 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
 
 namespace Breeze.NetClient {
 
+  [DebuggerDisplay("{Name}")]
   public class EntityType : StructuralType, IJsonSerializable {
 
     public EntityType() {
@@ -23,7 +25,7 @@ namespace Breeze.NetClient {
       }
       jNode.GetJNodeArray("dataProperties").Select(jn => new DataProperty(jn)).ForEach(dp => AddDataProperty(dp));
       jNode.GetJNodeArray("navigationProperties").Select(jn => new NavigationProperty(jn)).ForEach(np => AddNavigationProperty(np));
-      // validators
+      _validators = new ValidatorCollection(jNode.GetJNodeArray("validators"));
       // custom
     }
 
@@ -37,7 +39,7 @@ namespace Breeze.NetClient {
       jo.AddPrimitive("defaultResourceName", this.DefaultResourceName);
       jo.AddArray("dataProperties", this.DataProperties.Where(dp => dp.IsInherited == false));
       jo.AddArray("navigationProperties", this.NavigationProperties.Where(np => np.IsInherited == false));
-      // jo.AddArrayProperty("validators", this.Validators);
+      jo.AddArray("validators", this.Validators);
       // jo.AddProperty("custom", this.Custom.ToJObject)
       return jo;
     }
@@ -73,13 +75,21 @@ namespace Breeze.NetClient {
       get { return _foreignKeyProperties.ReadOnlyValues; }
     }
 
+    public ReadOnlyCollection<DataProperty> InverseForeignKeyProperties {
+      get { return _inverseForeignKeyProperties.ReadOnlyValues; }
+    }
+
     public ReadOnlyCollection<DataProperty> ConcurrencyProperties {
       get { return _concurrencyProperties.ReadOnlyValues; }
     }
 
+  
+
     #endregion
 
     #region Public methods
+
+   
 
     public IEntity CreateEntity() {
       var entity = (IEntity)Activator.CreateInstance(this.ClrType);
@@ -157,15 +167,14 @@ namespace Breeze.NetClient {
     private NavigationPropertyCollection _navigationProperties = new NavigationPropertyCollection();
     private SafeList<DataProperty> _keyProperties = new SafeList<DataProperty>();
     private SafeList<DataProperty> _foreignKeyProperties = new SafeList<DataProperty>();
+    internal SafeList<DataProperty> _inverseForeignKeyProperties = new SafeList<DataProperty>();
     private SafeList<DataProperty> _concurrencyProperties = new SafeList<DataProperty>();
+
 
     private SafeList<EntityType> _subtypes = new SafeList<EntityType>();
 
     #endregion
 
-
-
-  
   }
 
   public class EntityTypeCollection : MapCollection<String, EntityType> {

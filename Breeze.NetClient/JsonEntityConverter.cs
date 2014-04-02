@@ -14,16 +14,36 @@ namespace Breeze.NetClient {
 
   public class JsonEntityConverter : JsonConverter {
   
-    public JsonEntityConverter(EntityManager entityManager, MergeStrategy mergeStrategy) {
+    // currently the normalizeTypeNmFn is only needed during saves, not during queries. 
+    public JsonEntityConverter(EntityManager entityManager, MergeStrategy mergeStrategy, LoadingOperation loadingOperation, Func<String, String> normalizeTypeNameFn = null) {
       _entityManager = entityManager;
       _metadataStore = entityManager.MetadataStore;
       _mergeStrategy = mergeStrategy;
+      _loadingOperation = loadingOperation;
+      _normalizeTypeNameFn = normalizeTypeNameFn;
+      _allEntities = new List<IEntity>();
+    }
+
+    // AllEntities is a list of all deserialized entities not just the top level ones.
+    public List<IEntity> AllEntities {
+      get { return _allEntities; }
     }
 
     public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) {
       if (reader.TokenType != JsonToken.Null) {
         // Load JObject from stream
         var jObject = JObject.Load(reader);
+
+        //if (objectType == typeof(IEntity)) {
+        //  JToken typeNameToken;
+        //  if (jObject.TryGetValue("$type", out typeNameToken)) {
+        //    if (_normalizeTypeNameFn == null) {
+        //      throw new Exception("NormalizeTypeNameFn not defined");
+        //    }
+        //    var entityTypeName = _normalizeTypeNameFn(typeNameToken.Value<String>());
+        //    objectType = MetadataStore.Instance.GetEntityType(entityTypeName).ClrType;
+        //  }
+        //}
 
         var jsonContext = new JsonContext { JObject = jObject, ObjectType = objectType, Serializer = serializer };
         // Create target object based on JObject
@@ -38,10 +58,8 @@ namespace Breeze.NetClient {
       throw new NotImplementedException();
     }
 
-
     public override bool CanConvert(Type objectType) {
       return MetadataStore.IsStructuralType(objectType);
-      // return MetadataStore.IsStructuralType(objectType) || objectType == typeof(Object);
     }
 
 
@@ -53,21 +71,36 @@ namespace Breeze.NetClient {
         return _refMap[refToken.Value<String>()];
       }
 
-      var objectType = jsonContext.ObjectType;
-      var entityType =  _metadataStore.GetEntityType(objectType);
+      EntityType entityType;
+      Type objectType;
+      JToken typeToken = null;
+      if (jObject.TryGetValue("$type", out typeToken)) {
+        var clrTypeName = typeToken.Value<String>();
+        var entityTypeName = StructuralType.ClrTypeNameToStructuralTypeName(clrTypeName);
+        entityType = _metadataStore.GetEntityType(entityTypeName);
+        objectType = entityType.ClrType;
+        if (!jsonContext.ObjectType.IsAssignableFrom(objectType)) {
+          throw new Exception("Unable to convert returned type: " + objectType.Name + " into type: " + jsonContext.ObjectType.Name);
+        }
+        jsonContext.ObjectType = objectType;
+      } else {
+        objectType = jsonContext.ObjectType;
+        entityType =  _metadataStore.GetEntityType(objectType);
+      }
 
       // an entity type
       jsonContext.StructuralType = entityType;
       var keyValues = entityType.KeyProperties
         .Select(p => jObject[p.Name].ToObject(p.ClrType))
         .ToArray();
-      var entityKey = new EntityKey(entityType, keyValues);
+      var entityKey = EntityKey.Create(entityType, keyValues);
       var entity = _entityManager.FindEntityByKey(entityKey);
       if (entity == null) {
         entity = (IEntity)Activator.CreateInstance(objectType);
       }
       // must be called before populate
       UpdateRefMap(jObject, entity);
+      _allEntities.Add(entity);
       return PopulateEntity(jsonContext, entity);
 
     }
@@ -85,10 +118,14 @@ namespace Breeze.NetClient {
       if (aspect.EntityManager == null) {
         // new to this entityManager
         ParseObject(jsonContext, aspect);
+        aspect.Entity.Initialize();
+        // TODO: This is a nit.  Wierd case where a save adds a new entity will show up with
+        // a AttachOnQuery operation instead of AttachOnSave
         _entityManager.AttachQueriedEntity(entity, (EntityType) jsonContext.StructuralType);
       } else if (_mergeStrategy == MergeStrategy.OverwriteChanges || aspect.EntityState == EntityState.Unchanged) {
         // overwrite existing entityManager
         ParseObject(jsonContext, aspect);
+        aspect.OnEntityChanged(_loadingOperation == LoadingOperation.Query ? EntityAction.MergeOnQuery : EntityAction.MergeOnSave);
       } else {
         // preserveChanges handling - we still want to handle expands.
         ParseObject(jsonContext, null );
@@ -177,7 +214,17 @@ namespace Breeze.NetClient {
     private EntityManager _entityManager;
     private MetadataStore _metadataStore;
     private MergeStrategy _mergeStrategy;
+    private LoadingOperation _loadingOperation;
+    private Func<String, String> _normalizeTypeNameFn;
+    private List<IEntity> _allEntities;
     private Dictionary<String, Object> _refMap = new Dictionary<string, object>();
+  }
+
+  public enum LoadingOperation {
+    Query,
+    Save
+    // Import - not yet needed
+    // Attach - not yet needed
   }
 
   //public static class JsonFns {

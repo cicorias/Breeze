@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 
 using Breeze.Core;
+using Newtonsoft.Json.Serialization;
 
 namespace Breeze.NetClient {
 
@@ -25,14 +26,31 @@ namespace Breeze.NetClient {
       _jo = jo;
     }
 
+    public static JNode FromObject(Object o, bool shouldCamelCase) {
+      JObject jo;
+      if (shouldCamelCase) {
+        jo = (JObject)JToken.FromObject(o, CamelCaseSerializer);
+      } else {
+        jo = (JObject)JToken.FromObject(o);
+      }
+      return new JNode(jo);
+    }
+
     public bool IsEmpty {
       get {
         return !_jo.Values().Any();
       }
     }
 
-    public Object ToObject(Type t) {
+    public Object ToObject(Type t, bool shouldCamelCase = false) {
+      if (shouldCamelCase) {
+        return _jo.ToObject(t, CamelCaseSerializer);
+      }
       return _jo.ToObject(t);
+    }
+
+    public override String ToString() {
+      return _jo.ToString();
     }
         
     public Object Config {
@@ -45,10 +63,6 @@ namespace Breeze.NetClient {
     public void AddPrimitive(String propName, Object value, Object defaultValue = null) {
       if (value == null) return;
       if (value != null && value.Equals(defaultValue)) return;
-      Object val;
-      if (value is DateTimeOffset) {
-        var dummy = value;
-      }
       AddRaw(propName, new JValue(value));
     }
 
@@ -75,26 +89,22 @@ namespace Breeze.NetClient {
       AddRaw(propName, ja);
     }
 
+    public void AddArray<T>(String propName, IEnumerable<T> items, Func<T, JNode> func) {
+      if (!items.Any()) return;
+      var ja = ToJArray(items, func);
+      AddRaw(propName, ja);
+    }
+
     public void AddMap<T>(String propName, IDictionary<String, T> map) {
       if (map == null) return;
       if (!map.Values.Any()) return;
 
-      var jn = new JNode();
-      map.ForEach(kvp => {
-        var val = CvtValue(kvp.Value);
-        if (val != null) {
-          if (val is JToken) {
-            jn.AddRaw(kvp.Key, (JToken)val);
-          } else {
-            jn.AddRaw(kvp.Key, new JValue(val));
-          }
-        } else {
-          jn.AddRaw(kvp.Key, null);
-        }
-      });
+      var jn = BuildMapNode<T>(map);
       
       AddRaw(propName, jn._jo);
     }
+
+
 
     public void AddJNode(String propName, JNode jn) {
       if (jn == null) return;
@@ -109,6 +119,7 @@ namespace Breeze.NetClient {
     #endregion
 
     #region Get methods 
+
 
     public Object Get(String propName, Type objectType) {
       var prop = _jo.Property(propName);
@@ -130,7 +141,7 @@ namespace Breeze.NetClient {
       return val;
     }
 
-    private T GetToken<T>(String propName ) where T: JToken {
+    public T GetToken<T>(String propName ) where T: JToken {
       var prop = _jo.Property(propName);
       if (prop == null) return null;
       return (T)prop.Value;
@@ -156,7 +167,7 @@ namespace Breeze.NetClient {
     }
 
     // for non newable types like String, Int etc..
-    public IEnumerable<T> GetPrimitiveArray<T>(String propName)  {
+    public IEnumerable<T> GetArray<T>(String propName)  {
       var items = GetToken<JArray>(propName);
       if (items == null) {
         return Enumerable.Empty<T>();
@@ -166,8 +177,9 @@ namespace Breeze.NetClient {
         });
       }
     }
+  
 
-    public IEnumerable<Object> GetPrimitiveArray(String propName, IEnumerable<Type> toTypes) {
+    public IEnumerable<Object> GetArray(String propName, IEnumerable<Type> toTypes) {
       var items = GetToken<JArray>(propName);
       if (items == null) {
         return Enumerable.Empty<Object>();
@@ -178,7 +190,7 @@ namespace Breeze.NetClient {
       }
     }
 
-    public Dictionary<String, T> GetPrimitiveMap<T>(String propName) {
+    public Dictionary<String, T> GetMap<T>(String propName) {
       var map = (JObject)GetToken<JObject>(propName);
       if (map == null) return null;
       var rmap = new Dictionary<String, T>();
@@ -188,7 +200,7 @@ namespace Breeze.NetClient {
       return rmap;
     }
 
-    public Dictionary<String, Object> GetPrimitiveMap(String propName, Func<String, Type> toTypeFn) {
+    public Dictionary<String, Object> GetMap(String propName, Func<String, Type> toTypeFn) {
       var map = (JObject)GetToken<JObject>(propName);
       if (map == null) return null;
       var rmap = new Dictionary<String, Object>();
@@ -241,6 +253,7 @@ namespace Breeze.NetClient {
       return rmap;
     }
   
+
 
     // pass in a simple value, a JNode or a IJsonSerializable and returns either a simple value or a JObject or a JArray
     private static Object CvtValue(Object value) {
@@ -314,18 +327,53 @@ namespace Breeze.NetClient {
 
     #endregion
 
-    #region Other Private methods
+    #region Other methods
 
+    public static JNode BuildMapNode<T>(IDictionary<String, T> map) {
+      var jn = new JNode();
+      map.ForEach(kvp => {
+        var val = CvtValue(kvp.Value);
+        if (val != null) {
+          if (val is JToken) {
+            jn.AddRaw(kvp.Key, (JToken)val);
+          } else {
+            jn.AddRaw(kvp.Key, new JValue(val));
+          }
+        } else {
+          jn.AddRaw(kvp.Key, null);
+        }
+      });
+      return jn;
+    }
 
-    private static JArray ToJArray<T>(IEnumerable<T> items) {
+    public static JArray ToJArray<T>(IEnumerable<T> items) {
       var ja = new JArray();
       items.ForEach(v => ja.Add(CvtValue(v)));
       return ja;
     }
 
+    public static JArray ToJArray<T>(IEnumerable<T> items, Func<T, JNode> func) {
+      var ja = new JArray();
+      items.ForEach(v => ja.Add(func(v)));
+      return ja;
+    }
+
+    public override bool Equals(object obj) {
+      if (obj == this) return true;
+      var other = obj as JNode;
+      if (other == null) return false;
+      return EqualityComparer.Equals(this._jo, other._jo);
+    }
+
+    public override int GetHashCode() {
+      return EqualityComparer.GetHashCode(this._jo);
+    }
+
     #endregion
 
-    private JObject _jo;
+    internal JObject _jo;
+    private static JsonSerializer CamelCaseSerializer = new JsonSerializer() { ContractResolver = new CamelCasePropertyNamesContractResolver() };
+    private static JTokenEqualityComparer EqualityComparer = new JTokenEqualityComparer();
   }
 
 

@@ -1,29 +1,30 @@
 ﻿
 using Breeze.Core;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 namespace Breeze.NetClient {
-  /// <summary>
-  /// Strategy to control how Entities are merged into an EntityManager's cache.
-  /// </summary>
+  
   public class SaveResult {
 
     internal SaveResult(IEnumerable<IEntity> entities, Dictionary<EntityKey, EntityKey> keyMappings) {
       _savedEntities = new SafeList<IEntity>(entities);
-      _keyMappings = new ReadOnlyDictionary<EntityKey, EntityKey>(keyMappings);
+      _keyMappings = new SafeDictionary<EntityKey,EntityKey>(keyMappings);
     }
 
-    public ReadOnlyCollection<IEntity> SavedEntities {
+    public ReadOnlyCollection<IEntity> Entities {
       get { return _savedEntities.ReadOnlyValues;  }
     }
 
     public ReadOnlyDictionary<EntityKey, EntityKey> KeyMappings {
-      get { return _keyMappings; }
+      get { return _keyMappings.ReadOnlyDictionary; }
     }
 
     private SafeList<IEntity> _savedEntities;
-    private ReadOnlyDictionary<EntityKey, EntityKey> _keyMappings;
+    private SafeDictionary<EntityKey, EntityKey> _keyMappings;
+    
   }
 
- 
+
 }
